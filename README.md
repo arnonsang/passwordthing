@@ -1,6 +1,10 @@
 # passwordthing
 
-Everything that app needs to handle passwords and authentication, without sending sensitive data anywhere it doesn't need to go.
+[![CI](https://github.com/arnonsang/passwordthing/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/arnonsang/passwordthing/actions/workflows/npm-publish.yml)
+[![npm version](https://img.shields.io/npm/v/passwordthing)](https://www.npmjs.com/package/passwordthing)
+[![npm downloads](https://img.shields.io/npm/dm/passwordthing)](https://www.npmjs.com/package/passwordthing)
+
+Modular TypeScript library for password validation, generation, strength scoring, breach detection, PBKDF2 hashing, SRP-6a auth, and WebAuthn passkeys. Tree-shakeable. Zero runtime dependencies. ESM + CJS with full type declarations.
 
 ## Features
 
