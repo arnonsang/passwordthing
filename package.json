@@ -1,6 +1,6 @@
 {
   "name": "passwordthing",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A modular, privacy-first TypeScript library for frontend password and authentication flows.",
   "license": "MIT",
   "repository": {
