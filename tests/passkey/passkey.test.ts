@@ -1,6 +1,6 @@
 import { describe, expect, test, vi, afterEach, beforeAll } from 'vitest';
 import { arrayBufferToBase64URL, base64URLToArrayBuffer } from '../../src/passkey/utils.js';
-import { isSupported, register, authenticate } from '../../src/passkey/passkey.js';
+import { isSupported, register, authenticate, registerWithServerOptions, authenticateWithServerOptions } from '../../src/passkey/passkey.js';
 
 
 function makeBuffer(bytes: number[]): ArrayBuffer {
@@ -83,6 +83,102 @@ describe('register', () => {
         userDisplayName: 'Alice',
       }),
     ).rejects.toThrow('invalid credential type');
+  });
+});
+
+
+describe('registerWithServerOptions', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  test('accepts server publicKey JSON format and returns base64url response', async () => {
+    const mockCredential = {
+      id: 'cred-id',
+      rawId: makeBuffer([1, 2, 3, 4]),
+      type: 'public-key',
+      response: {
+        clientDataJSON: MOCK_CLIENT_DATA,
+        attestationObject: MOCK_ATTESTATION,
+      },
+    } as unknown as PublicKeyCredential;
+
+    vi.spyOn(navigator.credentials, 'create').mockResolvedValue(mockCredential);
+
+    const result = await registerWithServerOptions({
+      challenge: CHALLENGE_B64,
+      rp: { id: 'example.com', name: 'Example' },
+      user: { id: USER_ID_B64, name: 'alice', displayName: 'Alice' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      timeout: 60000,
+      attestation: 'none',
+    });
+
+    expect(result.id).toBe('cred-id');
+    expect(result.type).toBe('public-key');
+    expect(typeof result.rawId).toBe('string');
+    expect(typeof result.response.clientDataJSON).toBe('string');
+    expect(typeof result.response.attestationObject).toBe('string');
+  });
+
+  test('throws when credentials.create returns wrong type', async () => {
+    vi.spyOn(navigator.credentials, 'create').mockResolvedValue(null);
+    await expect(
+      registerWithServerOptions({
+        challenge: CHALLENGE_B64,
+        rp: { name: 'Example' },
+        user: { id: USER_ID_B64, name: 'alice', displayName: 'Alice' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      }),
+    ).rejects.toThrow('invalid credential type');
+  });
+});
+
+
+describe('authenticateWithServerOptions', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  test('accepts server options JSON format and returns base64url response', async () => {
+    const mockCredential = {
+      id: 'cred-id',
+      rawId: makeBuffer([1, 2, 3, 4]),
+      type: 'public-key',
+      response: {
+        clientDataJSON: MOCK_CLIENT_DATA,
+        authenticatorData: MOCK_AUTH_DATA,
+        signature: MOCK_SIGNATURE,
+        userHandle: MOCK_USER_HANDLE,
+      },
+    } as unknown as PublicKeyCredential;
+
+    vi.spyOn(navigator.credentials, 'get').mockResolvedValue(mockCredential);
+
+    const result = await authenticateWithServerOptions({
+      challenge: CHALLENGE_B64,
+      rpId: 'example.com',
+      allowCredentials: [{ id: USER_ID_B64, type: 'public-key' }],
+    });
+
+    expect(result.type).toBe('public-key');
+    expect(typeof result.response.signature).toBe('string');
+    expect(result.response.userHandle).not.toBeNull();
+  });
+
+  test('works without allowCredentials (discoverable credential flow)', async () => {
+    const mockCredential = {
+      id: 'cred-id',
+      rawId: makeBuffer([1]),
+      type: 'public-key',
+      response: {
+        clientDataJSON: MOCK_CLIENT_DATA,
+        authenticatorData: MOCK_AUTH_DATA,
+        signature: MOCK_SIGNATURE,
+        userHandle: null,
+      },
+    } as unknown as PublicKeyCredential;
+
+    vi.spyOn(navigator.credentials, 'get').mockResolvedValue(mockCredential);
+
+    const result = await authenticateWithServerOptions({ challenge: CHALLENGE_B64 });
+    expect(result.response.userHandle).toBeNull();
   });
 });
 

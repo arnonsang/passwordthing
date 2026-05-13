@@ -6,6 +6,8 @@
  *   2. Strength evaluation      - passwordthing/strength vs zxcvbn
  *   3. Password generation      - passwordthing/core vs generate-password
  *   4. Server-safe hashing      - passwordthing/crypto (PBKDF2) vs bcryptjs
+ *   5. TOTP generation          - passwordthing/otp
+ *   6. PKCE helpers             - passwordthing/pkce
  */
 
 import { performance } from 'node:perf_hooks';
@@ -14,6 +16,8 @@ import { performance } from 'node:perf_hooks';
 import { validate, generate } from '../dist/core/index.mjs';
 import { evaluateStrength } from '../dist/strength/index.mjs';
 import { pbkdf2Hash } from '../dist/crypto/index.mjs';
+import { generateSecret, generateTOTP, verifyTOTP } from '../dist/otp/index.mjs';
+import { generateCodeVerifier, generateCodeChallenge } from '../dist/pkce/index.mjs';
 
 // competitors
 import zxcvbn from 'zxcvbn';
@@ -49,7 +53,7 @@ async function benchAsync(label, fn, iterations) {
   return { label, iterations, elapsed, opsPerSec: Math.round(iterations / (elapsed / 1000)) };
 }
 
-function printTable(title, rows) {
+function printTable(title, rows, note) {
   console.log(`\n## ${title}\n`);
   const colWidths = [36, 10, 12, 14];
   const header = ['Library', 'Iterations', 'Time (ms)', 'ops/sec'];
@@ -61,10 +65,12 @@ function printTable(title, rows) {
   for (const r of rows) {
     console.log(fmt([r.label, r.iterations, r.elapsed.toFixed(1), r.opsPerSec.toLocaleString()]));
   }
-  // winner
-  const sorted = [...rows].sort((a, b) => b.opsPerSec - a.opsPerSec);
-  const ratio = (sorted[0].opsPerSec / sorted[1].opsPerSec).toFixed(2);
-  console.log(`\nFastest: ${sorted[0].label} (${ratio}x faster than ${sorted[1].label})`);
+  if (rows.length > 1) {
+    const sorted = [...rows].sort((a, b) => b.opsPerSec - a.opsPerSec);
+    const ratio = (sorted[0].opsPerSec / sorted[1].opsPerSec).toFixed(2);
+    console.log(`\nFastest: ${sorted[0].label} (${ratio}x faster than ${sorted[1].label})`);
+  }
+  if (note) console.log(`\nNote: ${note}`);
 }
 
 
@@ -72,7 +78,6 @@ function printTable(title, rows) {
 function benchValidation() {
   const ITERS = 50_000;
 
-  // passwordthing
   const pwResult = bench(
     'passwordthing validate()',
     (i) => validate(PASSWORDS[i % PASSWORDS.length], {
@@ -81,7 +86,6 @@ function benchValidation() {
     ITERS,
   );
 
-  // password-validator
   const schema = new PasswordValidator();
   schema.is().min(8).has().uppercase().has().digits().has().symbols();
 
@@ -150,23 +154,76 @@ async function benchHashing() {
     ITERS,
   );
 
-  // bcrypt cost 10 is typical production default
   const bcResult = await benchAsync(
     'bcryptjs (cost=10)',
     () => bcrypt.hash(PW, 10),
     ITERS,
   );
 
-  // bcrypt cost 12
   const bc12Result = await benchAsync(
     'bcryptjs (cost=12)',
     () => bcrypt.hash(PW, 12),
     ITERS,
   );
 
-  printTable(`4. Server-safe Hashing (${ITERS} ops each, intentionally slow)`, [ptResult, bcResult, bc12Result]);
-  console.log('\nNote: slower = harder to brute-force. PBKDF2-600k and bcrypt-12 are both');
-  console.log('      OWASP-recommended. Pick based on your stack, not raw speed.');
+  printTable(
+    `4. Server-safe Hashing (${ITERS} ops each, intentionally slow)`,
+    [ptResult, bcResult, bc12Result],
+    'slower = harder to brute-force. PBKDF2-600k and bcrypt-12 are both\n      OWASP-recommended. Pick based on your stack, not raw speed.',
+  );
+}
+
+
+// 5. TOTP (async, WebCrypto HMAC)
+async function benchOTP() {
+  const ITERS = 1_000;
+  const secret = generateSecret();
+
+  // warm up
+  await generateTOTP(secret);
+
+  const genResult = await benchAsync(
+    'passwordthing generateTOTP()',
+    () => generateTOTP(secret),
+    ITERS,
+  );
+
+  // warm up verify
+  const token = await generateTOTP(secret);
+  await verifyTOTP(secret, token);
+
+  const verifyResult = await benchAsync(
+    'passwordthing verifyTOTP() (±1 window)',
+    () => verifyTOTP(secret, token),
+    ITERS,
+  );
+
+  printTable('5. TOTP (1,000 ops each, WebCrypto HMAC)', [genResult, verifyResult]);
+}
+
+
+// 6. PKCE helpers (async, WebCrypto SHA-256)
+async function benchPKCE() {
+  const ITERS = 1_000;
+
+  const verifier = generateCodeVerifier();
+
+  // warm up
+  await generateCodeChallenge(verifier);
+
+  const verifierResult = bench(
+    'passwordthing generateCodeVerifier()',
+    () => generateCodeVerifier(),
+    ITERS,
+  );
+
+  const challengeResult = await benchAsync(
+    'passwordthing generateCodeChallenge()',
+    () => generateCodeChallenge(verifier),
+    ITERS,
+  );
+
+  printTable('6. PKCE Helpers (1,000 ops each, WebCrypto SHA-256)', [verifierResult, challengeResult]);
 }
 
 
@@ -179,5 +236,7 @@ benchValidation();
 benchStrength();
 benchGenerate();
 await benchHashing();
+await benchOTP();
+await benchPKCE();
 
 console.log('\nDone.\n');
