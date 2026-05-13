@@ -23,11 +23,6 @@ export type ValidationResult =
   | { isValid: true; failedRules: [] }
   | { isValid: false; failedRules: Array<FailedRule> };
 
-/**
- * Timing-safe comparison of two equal-length strings.
- * Note: length difference leaks length info by design, this guards against
- * character-by-character timing attacks on the character content only.
- */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let acc = 0;
@@ -47,7 +42,6 @@ interface CharAnalysis {
   maxRepeat: number;
 }
 
-// Reused per call to avoid per-invocation heap allocation (JS is single-threaded)
 const _analysis: CharAnalysis = { digits: 0, lower: 0, upper: 0, symbols: 0, hasSpace: false, isSequential: false, maxRepeat: 0 };
 
 function analyzeChars(s: string): CharAnalysis {
@@ -59,6 +53,8 @@ function analyzeChars(s: string): CharAnalysis {
   _analysis.isSequential = false;
   _analysis.maxRepeat = s.length > 0 ? 1 : 0;
   let curRepeat = 1;
+  let prevCode = 0;
+  let prevPrevCode = 0;
 
   for (let i = 0; i < s.length; i++) {
     const code = s.charCodeAt(i);
@@ -71,15 +67,18 @@ function analyzeChars(s: string): CharAnalysis {
     if (!_analysis.hasSpace && (code === 32 || (code >= 9 && code <= 13) || code === 160)) _analysis.hasSpace = true;
 
     if (!_analysis.isSequential && i >= 2) {
-      const prev2 = s.charCodeAt(i - 2);
-      const prev1 = s.charCodeAt(i - 1);
-      if ((prev1 === prev2 + 1 && code === prev2 + 2) || (prev1 === prev2 - 1 && code === prev2 - 2)) _analysis.isSequential = true;
+      const d1 = code - prevCode;
+      const d2 = prevCode - prevPrevCode;
+      if ((d1 === 1 && d2 === 1) || (d1 === -1 && d2 === -1)) _analysis.isSequential = true;
     }
 
     if (i > 0) {
-      curRepeat = code === s.charCodeAt(i - 1) ? curRepeat + 1 : 1;
+      curRepeat = code === prevCode ? curRepeat + 1 : 1;
       if (curRepeat > _analysis.maxRepeat) _analysis.maxRepeat = curRepeat;
     }
+
+    prevPrevCode = prevCode;
+    prevCode = code;
   }
 
   return _analysis;
@@ -88,63 +87,64 @@ function analyzeChars(s: string): CharAnalysis {
 export function validate(password: string, options: ValidationOptions = {}): ValidationResult {
   const failed: FailedRule[] = [];
 
-  if (options.min !== undefined && password.length < options.min) {
-    failed.push({ rule: 'min', message: `Must be at least ${options.min} characters long.` });
+  const { min, max, digits, lowercase, uppercase, symbols, spaces, not, is: customIs, regex, noSequential, noRepeating } = options;
+
+  if (min !== undefined && password.length < min) {
+    failed.push({ rule: 'min', message: `Must be at least ${min} characters long.` });
   }
-  if (options.max !== undefined && password.length > options.max) {
-    failed.push({ rule: 'max', message: `Must be no more than ${options.max} characters long.` });
+  if (max !== undefined && password.length > max) {
+    failed.push({ rule: 'max', message: `Must be no more than ${max} characters long.` });
   }
 
-  // Single-pass analysis for all char-level rules
   const needsAnalysis =
-    options.digits !== undefined ||
-    options.lowercase !== undefined ||
-    options.uppercase !== undefined ||
-    options.symbols !== undefined ||
-    options.spaces === false ||
-    options.noSequential === true ||
-    options.noRepeating !== undefined;
+    digits !== undefined ||
+    lowercase !== undefined ||
+    uppercase !== undefined ||
+    symbols !== undefined ||
+    spaces === false ||
+    noSequential === true ||
+    noRepeating !== undefined;
 
   if (needsAnalysis) {
     const a = analyzeChars(password);
 
-    if (options.digits !== undefined && a.digits < options.digits) {
-      failed.push({ rule: 'digits', message: `Must contain at least ${options.digits} numeric digit(s).` });
+    if (digits !== undefined && a.digits < digits) {
+      failed.push({ rule: 'digits', message: `Must contain at least ${digits} numeric digit(s).` });
     }
-    if (options.lowercase !== undefined && a.lower < options.lowercase) {
-      failed.push({ rule: 'lowercase', message: `Must contain at least ${options.lowercase} lowercase letter(s).` });
+    if (lowercase !== undefined && a.lower < lowercase) {
+      failed.push({ rule: 'lowercase', message: `Must contain at least ${lowercase} lowercase letter(s).` });
     }
-    if (options.uppercase !== undefined && a.upper < options.uppercase) {
-      failed.push({ rule: 'uppercase', message: `Must contain at least ${options.uppercase} uppercase letter(s).` });
+    if (uppercase !== undefined && a.upper < uppercase) {
+      failed.push({ rule: 'uppercase', message: `Must contain at least ${uppercase} uppercase letter(s).` });
     }
-    if (options.symbols !== undefined && a.symbols < options.symbols) {
-      failed.push({ rule: 'symbols', message: `Must contain at least ${options.symbols} symbol(s).` });
+    if (symbols !== undefined && a.symbols < symbols) {
+      failed.push({ rule: 'symbols', message: `Must contain at least ${symbols} symbol(s).` });
     }
-    if (options.spaces === false && a.hasSpace) {
+    if (spaces === false && a.hasSpace) {
       failed.push({ rule: 'spaces', message: 'Must not contain whitespace.' });
     }
-    if (options.noSequential === true && a.isSequential) {
+    if (noSequential === true && a.isSequential) {
       failed.push({ rule: 'noSequential', message: 'Must not contain sequential characters (e.g. "1234", "abcd", "dcba").' });
     }
-    if (options.noRepeating !== undefined && a.maxRepeat > options.noRepeating) {
-      failed.push({ rule: 'noRepeating', message: `Must not repeat the same character more than ${options.noRepeating} time(s) consecutively.` });
+    if (noRepeating !== undefined && a.maxRepeat > noRepeating) {
+      failed.push({ rule: 'noRepeating', message: `Must not repeat the same character more than ${noRepeating} time(s) consecutively.` });
     }
   }
 
-  if (options.not !== undefined) {
+  if (not !== undefined) {
     const lower = password.toLowerCase();
-    for (const blocked of options.not) {
+    for (const blocked of not) {
       if (timingSafeEqual(lower, blocked.toLowerCase())) {
         failed.push({ rule: 'not', message: 'This password is not allowed.' });
         break;
       }
     }
   }
-  if (options.regex !== undefined && !options.regex.test(password)) {
+  if (regex !== undefined && !regex.test(password)) {
     failed.push({ rule: 'regex', message: 'Password does not match the required pattern.' });
   }
-  if (options.is !== undefined) {
-    const result = options.is(password);
+  if (customIs !== undefined) {
+    const result = customIs(password);
     if (result !== true) {
       failed.push({
         rule: 'is',

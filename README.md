@@ -4,7 +4,7 @@
 [![npm version](https://img.shields.io/npm/v/passwordthing)](https://www.npmjs.com/package/passwordthing)
 [![npm downloads](https://img.shields.io/npm/dm/passwordthing)](https://www.npmjs.com/package/passwordthing)
 
-Everything that app needs to handle passwords and authentication, without sending sensitive data anywhere it doesn't need to go. Password validation, generation, strength scoring, breach detection, PBKDF2 hashing, SRP-6a auth, and WebAuthn passkeys.
+Everything that app needs to handle passwords and authentication, without sending sensitive data anywhere it doesn't need to go. Password validation, generation, strength scoring, breach detection, PBKDF2 hashing, SRP-6a auth, WebAuthn passkeys, TOTP/HOTP, and OAuth 2.0 PKCE.
 
 ## Features
 
@@ -16,8 +16,10 @@ Everything that app needs to handle passwords and authentication, without sendin
 - **Block common passwords** locally with a Bloom filter: no server round-trip, no list downloads at runtime
 - **Hash for your server** with PBKDF2 (SHA-256/384/512, OWASP 2024 iteration defaults) to derive and compare keys without ever logging the raw password
 - **Authenticate without passwords** using SRP-6a (RFC 5054) client-side registration and login proofs
-- **Go passwordless** with WebAuthn passkey helpers for registration and authentication
-- **React-ready** with `usePassword` and `usePasskey` hooks that wire everything together out of the box
+- **Go passwordless** with WebAuthn passkey helpers for registration and authentication, including server-options API for direct integration with any WebAuthn server
+- **Generate and verify TOTP/HOTP** codes (RFC 6238 / RFC 4226) using WebCrypto with zero dependencies
+- **PKCE helpers** for OAuth 2.0 flows (RFC 7636): generate a code verifier and S256 challenge
+- **Framework-ready** with `usePassword` and `usePasskey` hooks for React, Vue 3, and Svelte 5
 
 ## Installation
 
@@ -27,18 +29,22 @@ npm install passwordthing
 bun add passwordthing
 ```
 
-React is an optional peer dependency. Install it only if you use `passwordthing/react`.
+React, Vue, and Svelte are optional peer dependencies. Install only what you use.
 
 ## Modules
 
 | Subpath | Contents |
 |---|---|
-| `passwordthing/core` | `validate`, `generate`, `checkTypo` |
-| `passwordthing/strength` | `evaluateStrength`, `isCommonPassword`, `BloomFilter` |
-| `passwordthing/breach` | `checkBreach` |
-| `passwordthing/crypto` | `pbkdf2Hash`, `createSRPRegistration`, `createSRPProof` |
-| `passwordthing/passkey` | `isSupported`, `register`, `authenticate` |
-| `passwordthing/react` | `usePassword`, `usePasskey` |
+| [`passwordthing/core`](#passwordthingcore) | `validate`, `generate`, `checkTypo` |
+| [`passwordthing/strength`](#passwordthingstrength) | `evaluateStrength`, `isCommonPassword`, `BloomFilter` |
+| [`passwordthing/breach`](#passwordthingbreach) | `checkBreach` |
+| [`passwordthing/crypto`](#passwordthingcrypto) | `pbkdf2Hash`, `createSRPRegistration`, `createSRPProof` |
+| [`passwordthing/passkey`](#passwordthingpasskey) | `isSupported`, `register`, `authenticate`, `registerWithServerOptions`, `authenticateWithServerOptions` |
+| [`passwordthing/otp`](#passwordthingotp) | `generateSecret`, `generateTOTP`, `verifyTOTP`, `generateOTPAuthURL`, `hotp` |
+| [`passwordthing/pkce`](#passwordthingpkce) | `generateCodeVerifier`, `generateCodeChallenge` |
+| [`passwordthing/react`](#passwordthingreact) | `usePassword`, `usePasskey` |
+| [`passwordthing/vue`](#passwordthingvue) | `usePassword`, `usePasskey` |
+| [`passwordthing/svelte`](#passwordthingsvelte) | `usePassword`, `usePasskey` |
 
 ---
 
@@ -444,6 +450,178 @@ Returns `PasskeyAuthenticationResponse`.
 
 ---
 
+### `registerWithServerOptions(options)`
+
+Accepts the `publicKey` object directly from a WebAuthn server response instead of requiring field-by-field extraction. Compatible with webauthn-rs, SimpleWebAuthn, and any spec-compliant server.
+
+```ts
+import { registerWithServerOptions } from 'passwordthing/passkey';
+
+// server returns { publicKey: { challenge, rp, user, pubKeyCredParams, ... } }
+const response = await registerWithServerOptions(serverResponse.publicKey);
+
+// Send response to server for verification
+```
+
+**`ServerRegistrationOptions`**
+
+| Option | Type | Description |
+|---|---|---|
+| `challenge` | `string` | base64url challenge from server |
+| `rp` | `{ id?: string; name: string }` | Relying party info |
+| `user` | `{ id: string; name: string; displayName: string }` | User info (id is base64url) |
+| `pubKeyCredParams` | `Array<{ type: 'public-key'; alg: number }>` | Supported algorithms |
+| `timeout` | `number` | Optional timeout in milliseconds |
+| `attestation` | `AttestationConveyancePreference` | Optional attestation type |
+| `authenticatorSelection` | `AuthenticatorSelectionCriteria` | Optional authenticator selection |
+| `excludeCredentials` | `ServerCredentialDescriptor[]` | Optional credentials to exclude |
+
+Returns `PasskeyRegistrationResponse`.
+
+---
+
+### `authenticateWithServerOptions(options)`
+
+Accepts the `publicKey` object directly from a WebAuthn server authentication response.
+
+```ts
+import { authenticateWithServerOptions } from 'passwordthing/passkey';
+
+const response = await authenticateWithServerOptions(serverResponse.publicKey);
+
+// Send response to server for verification
+```
+
+**`ServerAuthenticationOptions`**
+
+| Option | Type | Description |
+|---|---|---|
+| `challenge` | `string` | base64url challenge from server |
+| `rpId` | `string` | Optional relying party domain |
+| `timeout` | `number` | Optional timeout in milliseconds |
+| `userVerification` | `UserVerificationRequirement` | Optional verification requirement |
+| `allowCredentials` | `ServerCredentialDescriptor[]` | Optional credential allowlist |
+
+Returns `PasskeyAuthenticationResponse`.
+
+---
+
+## `passwordthing/otp`
+
+TOTP and HOTP implementation using WebCrypto. Zero dependencies, works in browsers and Node.js. Follows RFC 6238 (TOTP) and RFC 4226 (HOTP).
+
+### `generateSecret()`
+
+Generates a cryptographically random 20-byte base32-encoded secret suitable for use with any TOTP authenticator app.
+
+```ts
+import { generateSecret } from 'passwordthing/otp';
+
+const secret = generateSecret(); // e.g. 'JBSWY3DPEHPK3PXP...'
+```
+
+---
+
+### `generateTOTP(secret, options?)`
+
+Generates the current TOTP code for a given secret.
+
+```ts
+import { generateTOTP } from 'passwordthing/otp';
+
+const code = await generateTOTP(secret);          // '123456'
+const code8 = await generateTOTP(secret, { digits: 8 }); // '12345678'
+```
+
+**`TOTPOptions`**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `digits` | `6 \| 8` | `6` | Output length |
+| `period` | `number` | `30` | Time step in seconds |
+| `algorithm` | `'SHA-1' \| 'SHA-256' \| 'SHA-512'` | `'SHA-1'` | HMAC algorithm (SHA-1 is the RFC standard) |
+| `window` | `number` | `1` | Drift tolerance in periods used by `verifyTOTP` |
+
+---
+
+### `verifyTOTP(secret, token, options?)`
+
+Verifies a TOTP code with configurable drift window to account for clock skew.
+
+```ts
+import { verifyTOTP } from 'passwordthing/otp';
+
+const valid = await verifyTOTP(secret, userInput); // boolean
+```
+
+---
+
+### `generateOTPAuthURL(options)`
+
+Generates an `otpauth://` URL for QR code display in authenticator apps (Google Authenticator, Authy, etc.).
+
+```ts
+import { generateSecret, generateOTPAuthURL } from 'passwordthing/otp';
+
+const secret = generateSecret();
+const url = generateOTPAuthURL({
+  secret,
+  issuer: 'Example App',
+  account: 'alice@example.com',
+});
+// otpauth://totp/Example%20App:alice%40example.com?secret=...&issuer=Example+App&algorithm=SHA1&digits=6&period=30
+```
+
+---
+
+### `hotp(secret, counter, digits?, algorithm?)`
+
+Low-level HMAC-based OTP (RFC 4226). Use `generateTOTP` / `verifyTOTP` for time-based codes.
+
+```ts
+import { hotp } from 'passwordthing/otp';
+
+const code = await hotp(secret, counter); // '755224'
+```
+
+---
+
+## `passwordthing/pkce`
+
+OAuth 2.0 PKCE helpers (RFC 7636). Use with any OAuth / OIDC authorization server that supports PKCE.
+
+### `generateCodeVerifier(length?)`
+
+Generates a cryptographically random code verifier (43-128 characters, base64url alphabet).
+
+```ts
+import { generateCodeVerifier } from 'passwordthing/pkce';
+
+const verifier = generateCodeVerifier(); // 64-char base64url string by default
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `length` | `number` | `64` | Output length between 43 and 128 |
+
+---
+
+### `generateCodeChallenge(verifier)`
+
+Derives the S256 code challenge from a verifier. Send this to the authorization server; keep the verifier for the token exchange.
+
+```ts
+import { generateCodeVerifier, generateCodeChallenge } from 'passwordthing/pkce';
+
+const verifier  = generateCodeVerifier();
+const challenge = await generateCodeChallenge(verifier);
+
+// Authorization request: include code_challenge=challenge&code_challenge_method=S256
+// Token request: include code_verifier=verifier
+```
+
+---
+
 ## `passwordthing/react`
 
 ### `usePassword(config?)`
@@ -536,6 +714,36 @@ function PasskeyButton() {
 | `error` | `Error \| null` | Last error, if any |
 | `register` | `(options: PasskeyRegisterOptions) => Promise<PasskeyRegistrationResponse \| null>` | Start a registration ceremony |
 | `authenticate` | `(options: PasskeyAuthenticateOptions) => Promise<PasskeyAuthenticationResponse \| null>` | Start an authentication ceremony |
+| `registerWithServerOptions` | `(options: ServerRegistrationOptions) => Promise<PasskeyRegistrationResponse \| null>` | Register using server response directly |
+| `authenticateWithServerOptions` | `(options: ServerAuthenticationOptions) => Promise<PasskeyAuthenticationResponse \| null>` | Authenticate using server response directly |
+
+---
+
+## `passwordthing/vue`
+
+Vue 3 composables with the same interface contract as the React hooks. Reactive values are exposed as `Ref` / `ComputedRef` from `vue`.
+
+```ts
+import { usePassword, usePasskey } from 'passwordthing/vue';
+```
+
+`usePassword(config?)` returns reactive `value`, `isValid`, `failedRules`, `strength`, `breachStatus`, `setValue`, and `generateNew`.
+
+`usePasskey()` returns `isSupported`, reactive `isAuthenticating` and `error` refs, plus `register`, `authenticate`, `registerWithServerOptions`, and `authenticateWithServerOptions`.
+
+---
+
+## `passwordthing/svelte`
+
+Svelte composables using Svelte stores (`Writable` / `Readable` from `svelte/store`). Compatible with Svelte 4 and Svelte 5.
+
+```ts
+import { usePassword, usePasskey } from 'passwordthing/svelte';
+```
+
+`usePassword(config?)` returns a `value` writable store, `isValid`, `failedRules`, `strength`, and `breachStatus` readable stores, plus `setValue`, `generateNew`, and a `destroy` cleanup function.
+
+`usePasskey()` returns `isSupported`, readable `isAuthenticating` and `error` stores, plus `register`, `authenticate`, `registerWithServerOptions`, and `authenticateWithServerOptions`.
 
 ---
 
@@ -545,18 +753,32 @@ All figures measured on Node.js v24 with `crypto.getRandomValues` and `crypto.su
 
 | Operation | Throughput | Per call | Notes |
 |---|---|---|---|
-| `validate()` | ~1.7M ops/sec | ~0.58µs | Single-pass char analysis, O(1) symbol lookup via typed array |
-| `generate()` | ~450K ops/sec | ~2.2µs | CSPRNG-backed; uses a pre-filled `Uint32Array` buffer to amortize `getRandomValues` calls |
-| `evaluateStrength()` | ~217K ops/sec | ~4.6µs | Pre-computed keyboard n-gram `Set`, single-pass entropy calc |
-| `pbkdf2Hash()` | ~8 ops/sec | ~129ms | Intentionally slow by design; 600K iterations (OWASP 2024 for SHA-256) |
+| `validate()` | ~3.3M ops/sec | ~0.30µs | Single-pass with cached rolling char codes, O(1) symbol lookup via typed array |
+| `generate()` | ~1.15M ops/sec | ~0.87µs | Pre-computed charset bytes + reused output buffer + `TextDecoder`; CSPRNG overhead amortized ~30x |
+| `evaluateStrength()` | ~315K ops/sec | ~3.2µs | Pre-computed keyboard n-gram `Set`, single-pass entropy calc |
+| `pbkdf2Hash()` | ~12 ops/sec | ~84ms | Intentionally slow by design; 600K iterations (OWASP 2024 for SHA-256) |
+| `generateTOTP()` | ~9K ops/sec | ~110µs | WebCrypto HMAC-SHA1 per call |
+| `verifyTOTP()` | ~4.3K ops/sec | ~235µs | 3 HMAC calls for ±1 window drift check |
+| `generateCodeVerifier()` | ~120K ops/sec | ~8µs | CSPRNG only, no hashing |
+| `generateCodeChallenge()` | ~12K ops/sec | ~81µs | WebCrypto SHA-256 per call |
 
-**`validate()`** runs a single character loop to collect uppercase, lowercase, digit, and symbol counts alongside sequential and repeating pattern checks. No regex, no multiple passes.
+Run benchmarks yourself with:
 
-**`generate()`** fills a `Uint32Array(256)` buffer with one `getRandomValues` call and drains it across multiple `generate()` invocations, reducing CSPRNG overhead by ~30x. Charset lookup is O(1) via a precomputed array indexed by a 5-bit bitmask.
+```bash
+bun run build && node scripts/bench.mjs
+```
+
+**`validate()`** runs a single character loop with rolling `prevCode`/`prevPrevCode` variables to classify each character and detect sequential/repeating patterns without re-indexing the string. Options are destructured once at the top so V8 register-allocates them. No regex, no multiple passes.
+
+**`generate()`** fills a `Uint32Array(256)` buffer with one `getRandomValues` call and drains it across multiple `generate()` invocations, reducing CSPRNG overhead by ~30x. The charset is pre-computed as a `Uint8Array` (avoiding `charCodeAt` per character), a module-level 256-byte output buffer is reused across calls (no heap allocation), and `TextDecoder.decode()` converts bytes to string via a native C++ path instead of `String.fromCharCode` spread.
 
 **`evaluateStrength()`** pre-computes all keyboard row n-grams (2-4 chars) into a `Set` at module load. Per-call cost is O(n) string slices with O(1) `Set.has` lookups rather than scanning each keyboard row on every call.
 
 **`pbkdf2Hash()`** throughput scales with iteration count. At `iterations: 1000` (testing only) throughput is ~1,700 ops/sec; production defaults are deliberately expensive to resist brute-force attacks.
+
+**`generateTOTP()` / `verifyTOTP()`** cost is dominated by a single WebCrypto `HMAC.sign` call per counter step. `verifyTOTP` makes 3 calls to cover the ±1 window, so throughput is roughly 3x lower.
+
+**`generateCodeChallenge()`** makes one `SHA-256.digest` call via WebCrypto. `generateCodeVerifier` is synchronous CSPRNG only and is ~13x faster.
 
 ## Building
 
@@ -569,7 +791,7 @@ bun run typecheck      # tsc --noEmit
 ## Testing
 
 ```bash
-bun run test               # unit tests (Vitest, 128 tests)
+bun run test               # unit tests (Vitest, 167 tests)
 bun run test:integration   # integration tests against built dist/
 bun run test:coverage      # coverage report
 ```
@@ -578,6 +800,8 @@ bun run test:coverage      # coverage report
 
 - Node.js 20 or later (or any modern runtime with `crypto.subtle` and `crypto.getRandomValues`)
 - React 19 (optional, only needed for `passwordthing/react`)
+- Vue 3 (optional, only needed for `passwordthing/vue`)
+- Svelte 5 (optional, only needed for `passwordthing/svelte`)
 
 ## License
 

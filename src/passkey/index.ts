@@ -5,5 +5,8 @@ export type {
   PasskeyRegistrationResponse,
   PasskeyAuthenticateOptions,
   PasskeyAuthenticationResponse,
+  ServerRegistrationOptions,
+  ServerAuthenticationOptions,
+  ServerCredentialDescriptor,
 } from './passkey.js';
-export { isSupported, register, authenticate } from './passkey.js';
+export { isSupported, register, authenticate, registerWithServerOptions, authenticateWithServerOptions } from './passkey.js';

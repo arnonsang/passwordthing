@@ -1,0 +1,21 @@
+{
+  "name": "@arnonsang/passwordthing",
+  "version": "0.1.2",
+  "exports": {
+    "./core": "./src/core/index.ts",
+    "./strength": "./src/strength/index.ts",
+    "./breach": "./src/breach/index.ts",
+    "./crypto": "./src/crypto/index.ts",
+    "./passkey": "./src/passkey/index.ts",
+    "./otp": "./src/otp/index.ts",
+    "./pkce": "./src/pkce/index.ts",
+    "./react": "./src/react/index.ts",
+    "./vue": "./src/vue/index.ts",
+    "./svelte": "./src/svelte/index.ts"
+  },
+  "exclude": [
+    "dist",
+    "tests",
+    "scripts"
+  ]
+}
