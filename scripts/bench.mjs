@@ -13,9 +13,9 @@
 import { performance } from 'node:perf_hooks';
 
 // passwordthing (built dist)
-import { validate, generate } from '../dist/core/index.mjs';
+import { validate, generate, generateBatch, generatePassphrase } from '../dist/core/index.mjs';
 import { evaluateStrength } from '../dist/strength/index.mjs';
-import { pbkdf2Hash } from '../dist/crypto/index.mjs';
+import { pbkdf2Hash, encrypt, decrypt } from '../dist/crypto/index.mjs';
 import { generateSecret, generateTOTP, verifyTOTP } from '../dist/otp/index.mjs';
 import { generateCodeVerifier, generateCodeChallenge } from '../dist/pkce/index.mjs';
 
@@ -227,6 +227,83 @@ async function benchPKCE() {
 }
 
 
+// 7. Batch generation
+function benchGenerateBatch() {
+  const ITERS = 1_000;
+
+  const batch5 = bench(
+    'passwordthing generateBatch(5)',
+    () => generateBatch(5, { length: 20 }),
+    ITERS,
+  );
+
+  const batch10 = bench(
+    'passwordthing generateBatch(10)',
+    () => generateBatch(10, { length: 20 }),
+    ITERS,
+  );
+
+  const batch50 = bench(
+    'passwordthing generateBatch(50)',
+    () => generateBatch(50, { length: 20 }),
+    ITERS,
+  );
+
+  printTable('7. Batch Password Generation (1,000 ops each)', [batch5, batch10, batch50]);
+}
+
+
+// 8. Passphrase generation
+function benchPassphrase() {
+  const ITERS = 10_000;
+
+  const result4 = bench(
+    'passwordthing generatePassphrase(4 words)',
+    () => generatePassphrase({ words: 4 }),
+    ITERS,
+  );
+
+  const result6 = bench(
+    'passwordthing generatePassphrase(6 words)',
+    () => generatePassphrase({ words: 6 }),
+    ITERS,
+  );
+
+  printTable('8. Passphrase Generation (10,000 ops each)', [result4, result6]);
+}
+
+
+// 9. AES-GCM encrypt / decrypt (async)
+async function benchEncrypt() {
+  const ITERS = 10;
+  const PLAIN = 'vault entry: MyS3cur3P@ssw0rd! for example.com';
+  const PW = 'vault-master-password';
+
+  // warm up
+  const warm = await encrypt(PLAIN, PW);
+  await decrypt(warm, PW);
+
+  const encResult = await benchAsync(
+    'passwordthing encrypt() AES-256-GCM',
+    () => encrypt(PLAIN, PW),
+    ITERS,
+  );
+
+  const data = await encrypt(PLAIN, PW);
+  const decResult = await benchAsync(
+    'passwordthing decrypt() AES-256-GCM',
+    () => decrypt(data, PW),
+    ITERS,
+  );
+
+  printTable(
+    `9. AES-GCM Vault Encrypt/Decrypt (${ITERS} ops each, PBKDF2-SHA256-600k)`,
+    [encResult, decResult],
+    'Dominated by PBKDF2 key derivation. Use same EncryptOptions on encrypt and decrypt.',
+  );
+}
+
+
 // Main
 console.log('passwordthing performance benchmark');
 console.log('====================================');
@@ -238,5 +315,8 @@ benchGenerate();
 await benchHashing();
 await benchOTP();
 await benchPKCE();
+benchGenerateBatch();
+benchPassphrase();
+await benchEncrypt();
 
 console.log('\nDone.\n');

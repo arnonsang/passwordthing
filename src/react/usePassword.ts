@@ -1,3 +1,23 @@
+/**
+ * @module react/usePassword
+ *
+ * React hook that combines password generation, validation,
+ * strength evaluation, and breach checking with debounced
+ * HIBP lookups.
+ *
+ * @example
+ * ```tsx
+ * import { usePassword } from 'passwordthing/react';
+ *
+ * function SignUpForm() {
+ *   const { value, setValue, isValid, strength, breachStatus, generateNew } =
+ *     usePassword({ rules: { min: 8, digits: 1 }, enableBreachCheck: true });
+ *
+ *   return <input value={value} onChange={e => setValue(e.target.value)} />;
+ * }
+ * ```
+ */
+
 import { useState, useCallback, useRef, useMemo } from 'react';
 import type { ValidationOptions, ValidationResult } from '../core/validate.js';
 import { validate } from '../core/validate.js';
@@ -9,29 +29,53 @@ import type { BreachResult } from '../breach/check.js';
 import { checkBreach } from '../breach/check.js';
 
 export interface UsePasswordConfig {
+  /** Validation rules (min, max, digits, etc.). */
   rules?: ValidationOptions;
+  /** Strength scoring preset. Default `'BASIC'`. */
   strengthPreset?: StrengthPreset;
+  /** Enable Have I Been Pwned breach checking. Default `false`. */
   enableBreachCheck?: boolean;
+  /** Debounce delay in ms for breach lookups. Default 500. */
   breachDebounceMs?: number;
+  /** Known user data to penalize in strength evaluation. */
   userInputs?: string[];
 }
 
 export interface BreachStatus {
+  /** Whether a breach check is in progress. */
   loading: boolean;
+  /** Whether the password was found in known breaches. */
   isPwned: boolean;
+  /** Number of occurrences across breaches. */
   occurrences: number;
 }
 
 export interface UsePasswordReturn {
+  /** Current password value. */
   value: string;
+  /** Update password value (triggers validation, strength, breach). */
   setValue: (val: string) => void;
+  /** Whether the password passes all validation rules. */
   isValid: boolean;
+  /** List of failed validation rules with messages. */
   failedRules: ValidationResult['failedRules'];
+  /** Strength evaluation result, or null if value is empty. */
   strength: StrengthResult | null;
+  /** Breach check status, or null if breach check is disabled. */
   breachStatus: BreachStatus | null;
+  /** Generate a new password with the given generator options. */
   generateNew: (options: GeneratorOptions) => void;
 }
 
+/**
+ * React hook for password management.
+ *
+ * Integrates validation, strength evaluation, and optional
+ * debounced HIBP breach checking into a single reactive hook.
+ *
+ * @param config - Optional configuration.
+ * @returns Password state and actions.
+ */
 export function usePassword(config: UsePasswordConfig = {}): UsePasswordReturn {
   const {
     rules,

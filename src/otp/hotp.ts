@@ -1,7 +1,30 @@
+/**
+ * @module otp/hotp
+ *
+ * HMAC-based One-Time Password (RFC 4226). Computes a
+ * truncated HMAC over a 64-bit big-endian counter value.
+ *
+ * @example
+ * ```ts
+ * import { hotp } from 'passwordthing/otp';
+ * const token = await hotp('JBSWY3DPEHPK3PXP', 0);
+ * ```
+ */
+
 import { base32Decode } from './base32.js';
 
+/** Supported HMAC hash algorithms for HOTP/TOTP. */
 export type HMACAlgorithm = 'SHA-1' | 'SHA-256' | 'SHA-512';
 
+/**
+ * Generate an HOTP token.
+ *
+ * @param secret - Base32-encoded shared secret.
+ * @param counter - 64-bit counter value.
+ * @param digits - Number of digits in the token (6 or 8). Default 6.
+ * @param algorithm - HMAC hash algorithm. Default `'SHA-1'`.
+ * @returns Zero-padded OTP string.
+ */
 export async function hotp(
   secret: string,
   counter: number,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as fc from 'fast-check';
-import { generate } from '../../src/core/generate.js';
+import { generate, generateBatch } from '../../src/core/generate.js';
 
 const UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const LOWERCASE = 'abcdefghijklmnopqrstuvwxyz';
@@ -122,5 +122,28 @@ describe('generate – error handling', () => {
     expect(() =>
       generate({ length: 8, includeUppercase: false, includeLowercase: false, includeDigits: false }),
     ).toThrow();
+  });
+});
+
+describe('generateBatch', () => {
+  test('returns requested count', () => {
+    const batch = generateBatch(10, { length: 12 });
+    expect(batch).toHaveLength(10);
+  });
+
+  test('all passwords have correct length', () => {
+    const batch = generateBatch(5, { length: 16 });
+    for (const pw of batch) expect(pw.length).toBe(16);
+  });
+
+  test('throws on count < 1', () => {
+    expect(() => generateBatch(0, { length: 8 })).toThrow(RangeError);
+    expect(() => generateBatch(-1, { length: 8 })).toThrow(RangeError);
+  });
+
+  test('returns distinct passwords', () => {
+    const batch = generateBatch(50, { length: 20 });
+    const unique = new Set(batch);
+    expect(unique.size).toBeGreaterThan(1);
   });
 });

@@ -1,19 +1,50 @@
+/**
+ * @module core/validate
+ *
+ * Password validation engine with single-pass character analysis,
+ * constant-time blocklist matching, and support for custom validators.
+ *
+ * @example
+ * ```ts
+ * import { validate } from 'passwordthing/core';
+ * const result = validate('MyStr0ng!Pw', {
+ *   min: 8,
+ *   digits: 1,
+ *   uppercase: 1,
+ *   symbols: 1,
+ *   noSequential: true,
+ * });
+ * ```
+ */
+
 const SYMBOL_CHARS = '!@#$%^&*()_+~|}{[]:;?><,./-=';
 const SYMBOL_LOOKUP = new Uint8Array(128);
 for (let _i = 0; _i < SYMBOL_CHARS.length; _i++) SYMBOL_LOOKUP[SYMBOL_CHARS.charCodeAt(_i)] = 1;
 
 export interface ValidationOptions {
+  /** Minimum length. */
   min?: number;
+  /** Maximum length. */
   max?: number;
+  /** Minimum number of digits. */
   digits?: number;
+  /** Minimum number of lowercase letters. */
   lowercase?: number;
+  /** Minimum number of uppercase letters. */
   uppercase?: number;
+  /** Minimum number of symbol characters. */
   symbols?: number;
+  /** If `false`, whitespace is not allowed. */
   spaces?: boolean;
+  /** Blocked passwords (case-insensitive constant-time comparison). */
   not?: string[];
+  /** Custom validator returning `true` for pass, or a `string` message for fail. */
   is?: (val: string) => boolean | string;
+  /** Regex pattern the password must match. */
   regex?: RegExp;
+  /** If `true`, disallow sequential characters (e.g. "1234", "abcd"). */
   noSequential?: boolean;
+  /** Maximum consecutive repeats of the same character. */
   noRepeating?: number;
 }
 
@@ -84,6 +115,27 @@ function analyzeChars(s: string): CharAnalysis {
   return _analysis;
 }
 
+/**
+ * Validate a password against the given options.
+ *
+ * Performs a single-pass character analysis and applies each
+ * requested rule. Blocklisted passwords are compared with
+ * constant-time comparison to prevent timing side-channels.
+ *
+ * @param password - The password to validate.
+ * @param options - Validation rules.
+ * @returns Validation result (isValid + optional failed rules).
+ *
+ * @example
+ * ```ts
+ * const result = validate('abc', { min: 8, digits: 1 });
+ * if (!result.isValid) {
+ *   for (const { rule, message } of result.failedRules) {
+ *     console.error(`${rule}: ${message}`);
+ *   }
+ * }
+ * ```
+ */
 export function validate(password: string, options: ValidationOptions = {}): ValidationResult {
   const failed: FailedRule[] = [];
 
