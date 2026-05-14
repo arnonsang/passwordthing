@@ -1,9 +1,41 @@
+/**
+ * @module core/typo
+ *
+ * Typo detection using Levenshtein distance.
+ *
+ * @example
+ * ```ts
+ * import { checkTypo } from 'passwordthing/core';
+ * const result = checkTypo('mypassword', 'mypasword');
+ * // { match: false, distance: 1, message: '1 character off' }
+ * ```
+ */
+
 export interface TypoResult {
+  /** Whether the strings are identical. */
   match: boolean;
+  /** Levenshtein edit distance. */
   distance: number;
+  /** Human-readable comparison result. */
   message: 'Match' | '1 character off' | 'Significantly different';
 }
 
+/**
+ * Check if two strings differ by a typo (Levenshtein distance).
+ *
+ * Uses an optimized two-row iterative Levenshtein algorithm with
+ * O(n*m) time and O(min(n,m)) space.
+ *
+ * @param a - First string.
+ * @param b - Second string.
+ * @returns Typo result with match flag, distance, and message.
+ *
+ * @example
+ * ```ts
+ * checkTypo('hello', 'hallo'); // { match: false, distance: 1, message: '1 character off' }
+ * checkTypo('hello', 'hello'); // { match: true, distance: 0, message: 'Match' }
+ * ```
+ */
 export function checkTypo(a: string, b: string): TypoResult {
   const distance = levenshtein(a, b);
   const match = distance === 0;

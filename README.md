@@ -10,10 +10,13 @@ Everything that app needs to handle passwords and authentication, without sendin
 
 - **Validate** passwords against composable rules: length, character classes, no common passwords, no keyboard walks, no sequential or repeating characters
 - **Generate** secure, memorable, or PIN-style passwords from a CSPRNG with no statistical bias
+- **Generate passphrases** with a diceware-style word list (1191 words, ~10.2 bits/word) — no dependencies, CSPRNG-backed
+- **Generate in batches** with `generateBatch` for producing multiple passwords in one call
 - **Detect typos** between two password strings (e.g. confirm-password mismatch hints)
-- **Evaluate strength** with entropy-based scoring and human-readable time-to-crack estimates
-- **Check breaches** against HaveIBeenPwned using k-anonymity: only 5 prefix characters ever leave the device
-- **Block common passwords** locally with a Bloom filter: no server round-trip, no list downloads at runtime
+- **Evaluate strength** with entropy-based scoring, human-readable time-to-crack estimates, and penalties for common passwords, leet-speak, keyboard walks (horizontal and vertical), date patterns, and character repetition
+- **Check breaches** against HaveIBeenPwned using k-anonymity: only 5 prefix characters ever leave the device, with configurable timeout and optional sessionStorage caching
+- **Block common passwords** locally with a Bloom filter covering 99,999 passwords at ~1% false-positive rate: no server round-trip, no list downloads at runtime
+- **Encrypt vault data** client-side with AES-256-GCM and PBKDF2 key derivation (OWASP 2024 defaults)
 - **Hash for your server** with PBKDF2 (SHA-256/384/512, OWASP 2024 iteration defaults) to derive and compare keys without ever logging the raw password
 - **Authenticate without passwords** using SRP-6a (RFC 5054) client-side registration and login proofs
 - **Go passwordless** with WebAuthn passkey helpers for registration and authentication, including server-options API for direct integration with any WebAuthn server
@@ -35,10 +38,10 @@ React, Vue, and Svelte are optional peer dependencies. Install only what you use
 
 | Subpath | Contents |
 |---|---|
-| [`passwordthing/core`](#passwordthingcore) | `validate`, `generate`, `checkTypo` |
+| [`passwordthing/core`](#passwordthingcore) | `validate`, `generate`, `generateBatch`, `generatePassphrase`, `checkTypo` |
 | [`passwordthing/strength`](#passwordthingstrength) | `evaluateStrength`, `isCommonPassword`, `BloomFilter` |
 | [`passwordthing/breach`](#passwordthingbreach) | `checkBreach` |
-| [`passwordthing/crypto`](#passwordthingcrypto) | `pbkdf2Hash`, `createSRPRegistration`, `createSRPProof` |
+| [`passwordthing/crypto`](#passwordthingcrypto) | `pbkdf2Hash`, `encrypt`, `decrypt`, `createSRPRegistration`, `createSRPProof` |
 | [`passwordthing/passkey`](#passwordthingpasskey) | `isSupported`, `register`, `authenticate`, `registerWithServerOptions`, `authenticateWithServerOptions` |
 | [`passwordthing/otp`](#passwordthingotp) | `generateSecret`, `generateTOTP`, `verifyTOTP`, `generateOTPAuthURL`, `hotp` |
 | [`passwordthing/pkce`](#passwordthingpkce) | `generateCodeVerifier`, `generateCodeChallenge` |
@@ -135,6 +138,52 @@ const password = generate({
 
 ---
 
+### `generateBatch(count, options)`
+
+Generates multiple passwords in a single call. Equivalent to calling `generate(options)` `count` times.
+
+```ts
+import { generateBatch } from 'passwordthing/core';
+
+const suggestions = generateBatch(5, {
+  length: 16,
+  includeSymbols: true,
+  excludeAmbiguous: true,
+});
+// ['Kx9#mPqR!vZnTy2', ...]
+```
+
+Throws `RangeError` if `count < 1`.
+
+---
+
+### `generatePassphrase(options?)`
+
+Generates a cryptographically secure diceware-style passphrase. Uses a built-in 1191-word list (~10.2 bits/word). Four words yields ~41 bits of entropy; six words yields ~61 bits.
+
+```ts
+import { generatePassphrase } from 'passwordthing/core';
+
+generatePassphrase();
+// 'coral-brave-stomp-lofty'
+
+generatePassphrase({ words: 6, capitalize: true, includeNumber: true });
+// 'Coral-Brave-Stomp-Lofty-Suite-Epoch-7'
+```
+
+**`PassphraseOptions`**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `words` | `number` | `4` | Number of words. Minimum `1`. |
+| `separator` | `string` | `'-'` | Word separator |
+| `capitalize` | `boolean` | `false` | Capitalize first letter of each word |
+| `includeNumber` | `boolean` | `false` | Append one random digit (0-9) |
+
+Throws `RangeError` if `words < 1`.
+
+---
+
 ### `checkTypo(a, b)`
 
 Computes the Levenshtein edit distance between two strings and returns a human-readable typo verdict. Useful for "confirm password" fields.
@@ -165,7 +214,7 @@ interface TypoResult {
 
 ### `evaluateStrength(password, options?)`
 
-Evaluates password entropy with penalization for common passwords, leet-speak substitutions, keyboard walks, and user-supplied personal inputs (name, email, etc.).
+Evaluates password entropy with penalties for: common passwords (Bloom filter, 99,999-word list), leet-speak substitutions, keyboard walks (horizontal rows and vertical columns), date and year patterns, character repetition dominance, and user-supplied personal inputs (name, email, etc.).
 
 ```ts
 import { evaluateStrength } from 'passwordthing/strength';
@@ -241,16 +290,30 @@ filter.has('somePassword');
 
 ## `passwordthing/breach`
 
-### `checkBreach(password)`
+### `checkBreach(password, options?)`
 
-Checks whether a password has appeared in known data breaches using the HaveIBeenPwned Passwords API. Uses k-anonymity: only the first 5 hex characters of the SHA-1 hash are sent over the network.
+Checks whether a password has appeared in known data breaches using the HaveIBeenPwned Passwords API. Uses k-anonymity: only the first 5 hex characters of the SHA-1 hash are sent over the network. Includes `Add-Padding: true` for traffic-analysis resistance.
 
 ```ts
 import { checkBreach } from 'passwordthing/breach';
 
 const result = await checkBreach('hunter2');
 // { isPwned: true, occurrences: 17984 }
+
+// With timeout and session caching (avoids refetch for same prefix)
+const result2 = await checkBreach('mypassword', {
+  timeoutMs: 3000,
+  cache: 'session',
+});
 ```
+
+**`BreachCheckOptions`**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `timeoutMs` | `number` | `5000` | Request timeout in milliseconds. Set to `0` to disable. |
+| `signal` | `AbortSignal` | | External abort signal to cancel the request |
+| `cache` | `'session' \| 'none'` | `'none'` | Cache prefix responses in `sessionStorage` to avoid redundant fetches for passwords sharing the same 5-char SHA-1 prefix. SSR-safe. |
 
 **`BreachResult`**
 
@@ -261,7 +324,7 @@ interface BreachResult {
 }
 ```
 
-Throws if the HIBP API returns a non-2xx status.
+Throws `Error` if the HIBP API returns a non-2xx status. Throws `DOMException` if the request times out or is aborted.
 
 ---
 
@@ -309,6 +372,43 @@ interface Pbkdf2HashResult {
   salt: string;  // hex-encoded salt
 }
 ```
+
+---
+
+### `encrypt(plaintext, password, options?)` / `decrypt(data, password, options?)`
+
+AES-256-GCM authenticated encryption with PBKDF2 key derivation. Suitable for client-side vault storage (e.g. encrypting a JSON blob of saved passwords with a master password). Each `encrypt` call generates a fresh random salt and IV, so identical inputs produce different ciphertext.
+
+```ts
+import { encrypt, decrypt } from 'passwordthing/crypto';
+
+// Encrypt
+const vault = await encrypt(JSON.stringify(myPasswords), masterPassword);
+localStorage.setItem('vault', JSON.stringify(vault));
+
+// Decrypt
+const stored = JSON.parse(localStorage.getItem('vault')!);
+const plain = await decrypt(stored, masterPassword);
+```
+
+**`EncryptOptions`**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `hash` | `'SHA-256' \| 'SHA-384' \| 'SHA-512'` | `'SHA-256'` | PBKDF2 hash algorithm |
+| `iterations` | `number` | OWASP default for chosen algorithm | Override PBKDF2 iteration count |
+
+**`EncryptedData`**
+
+```ts
+interface EncryptedData {
+  ciphertext: string;  // base64-encoded AES-GCM ciphertext (includes authentication tag)
+  iv: string;          // hex-encoded 12-byte AES-GCM IV
+  salt: string;        // hex-encoded 16-byte PBKDF2 salt
+}
+```
+
+`decrypt` throws `DOMException` if the password is wrong or the data has been tampered with (authentication tag mismatch).
 
 ---
 
@@ -753,14 +853,19 @@ All figures measured on Node.js v24 with `crypto.getRandomValues` and `crypto.su
 
 | Operation | Throughput | Per call | Notes |
 |---|---|---|---|
-| `validate()` | ~3.3M ops/sec | ~0.30µs | Single-pass with cached rolling char codes, O(1) symbol lookup via typed array |
-| `generate()` | ~1.15M ops/sec | ~0.87µs | Pre-computed charset bytes + reused output buffer + `TextDecoder`; CSPRNG overhead amortized ~30x |
-| `evaluateStrength()` | ~315K ops/sec | ~3.2µs | Pre-computed keyboard n-gram `Set`, single-pass entropy calc |
-| `pbkdf2Hash()` | ~12 ops/sec | ~84ms | Intentionally slow by design; 600K iterations (OWASP 2024 for SHA-256) |
-| `generateTOTP()` | ~9K ops/sec | ~110µs | WebCrypto HMAC-SHA1 per call |
-| `verifyTOTP()` | ~4.3K ops/sec | ~235µs | 3 HMAC calls for ±1 window drift check |
-| `generateCodeVerifier()` | ~120K ops/sec | ~8µs | CSPRNG only, no hashing |
-| `generateCodeChallenge()` | ~12K ops/sec | ~81µs | WebCrypto SHA-256 per call |
+| `validate()` | ~1.9M ops/sec | ~0.53µs | Single-pass with rolling char codes, O(1) symbol lookup via typed array |
+| `generate()` | ~350K ops/sec | ~2.9µs | Pre-computed charset bytes + reused output buffer; CSPRNG overhead amortized ~30x |
+| `generateBatch(5)` | ~72K ops/sec | ~14µs | 5 passwords per call |
+| `generateBatch(10)` | ~31K ops/sec | ~32µs | 10 passwords per call; scales linearly |
+| `generatePassphrase()` | ~440K ops/sec | ~2.3µs | 4-word default; CSPRNG rejection sampling against 1191-word list |
+| `evaluateStrength()` | ~52K ops/sec | ~19µs | Pre-computed keyboard n-gram `Set`; date regex, repetition scan added |
+| `pbkdf2Hash()` | ~5 ops/sec | ~200ms | Intentionally slow; 600K iterations (OWASP 2024 for SHA-256) |
+| `encrypt()` | ~5 ops/sec | ~200ms | Dominated by PBKDF2 key derivation |
+| `decrypt()` | ~5 ops/sec | ~200ms | Dominated by PBKDF2 key derivation |
+| `generateTOTP()` | ~2.3K ops/sec | ~440µs | WebCrypto HMAC-SHA1 per call |
+| `verifyTOTP()` | ~940 ops/sec | ~1ms | 3 HMAC calls for ±1 window drift check |
+| `generateCodeVerifier()` | ~79K ops/sec | ~13µs | CSPRNG only, no hashing |
+| `generateCodeChallenge()` | ~2.5K ops/sec | ~400µs | WebCrypto SHA-256 per call |
 
 Run benchmarks yourself with:
 
@@ -772,9 +877,11 @@ bun run build && node scripts/bench.mjs
 
 **`generate()`** fills a `Uint32Array(256)` buffer with one `getRandomValues` call and drains it across multiple `generate()` invocations, reducing CSPRNG overhead by ~30x. The charset is pre-computed as a `Uint8Array` (avoiding `charCodeAt` per character), a module-level 256-byte output buffer is reused across calls (no heap allocation), and `TextDecoder.decode()` converts bytes to string via a native C++ path instead of `String.fromCharCode` spread.
 
-**`evaluateStrength()`** pre-computes all keyboard row n-grams (2-4 chars) into a `Set` at module load. Per-call cost is O(n) string slices with O(1) `Set.has` lookups rather than scanning each keyboard row on every call.
+**`generatePassphrase()`** uses the same CSPRNG buffer as `generate()` (shared `_rng` module, fills a `Uint32Array(256)` in one `getRandomValues` call and drains across invocations). Rejection sampling eliminates modulo bias with negligible overhead at 1191 words.
 
-**`pbkdf2Hash()`** throughput scales with iteration count. At `iterations: 1000` (testing only) throughput is ~1,700 ops/sec; production defaults are deliberately expensive to resist brute-force attacks.
+**`evaluateStrength()`** pre-computes all keyboard row n-grams (length 4+) and vertical column walks (exact 3-char strings) into a module-level `Set`. Per-call cost is one O(n) pass for entropy, one O(n) pass for repetition frequency, plus O(n) string-slice / `Set.has` lookups for keyboard detection. Date pattern checks use pre-compiled regexes at module scope (no recompilation per call).
+
+**`pbkdf2Hash()` / `encrypt()` / `decrypt()`** throughput is dominated by PBKDF2 key derivation. At `iterations: 1000` (testing only) throughput is ~1,700 ops/sec; production defaults are deliberately expensive to resist brute-force attacks. `encrypt` and `decrypt` have near-identical cost since both derive the key via PBKDF2 before the AES-GCM operation.
 
 **`generateTOTP()` / `verifyTOTP()`** cost is dominated by a single WebCrypto `HMAC.sign` call per counter step. `verifyTOTP` makes 3 calls to cover the ±1 window, so throughput is roughly 3x lower.
 
@@ -791,7 +898,7 @@ bun run typecheck      # tsc --noEmit
 ## Testing
 
 ```bash
-bun run test               # unit tests (Vitest, 167 tests)
+bun run test               # unit tests (Vitest, 205 tests)
 bun run test:integration   # integration tests against built dist/
 bun run test:coverage      # coverage report
 ```

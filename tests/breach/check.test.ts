@@ -85,3 +85,50 @@ describe('checkBreach – error handling', () => {
     await expect(checkBreach(PASSWORD)).rejects.toThrow('503');
   });
 });
+
+describe('checkBreach – timeout option', () => {
+  test('aborts with DOMException when request exceeds timeoutMs', async () => {
+    server.use(
+      http.get('https://api.pwnedpasswords.com/range/:prefix', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return HttpResponse.text('');
+      }),
+    );
+    await expect(checkBreach(PASSWORD, { timeoutMs: 50 })).rejects.toThrow();
+  });
+
+  test('succeeds when request completes within timeoutMs', async () => {
+    server.use(mockHibpHandler(HASH_PREFIX, `${HASH_SUFFIX}:1`));
+    const result = await checkBreach(PASSWORD, { timeoutMs: 5000 });
+    expect(result.isPwned).toBe(true);
+  });
+
+  test('no timeout when timeoutMs is 0', async () => {
+    server.use(mockHibpHandler(HASH_PREFIX, `${HASH_SUFFIX}:1`));
+    const result = await checkBreach(PASSWORD, { timeoutMs: 0 });
+    expect(result.isPwned).toBe(true);
+  });
+});
+
+describe('checkBreach – cache option', () => {
+  test("cache: 'none' does not store to sessionStorage", async () => {
+    server.use(mockHibpHandler(HASH_PREFIX, `${HASH_SUFFIX}:5`));
+    await checkBreach(PASSWORD, { cache: 'none' });
+    const stored = (globalThis as unknown as { sessionStorage?: Storage }).sessionStorage?.getItem(`pt_hibp_${HASH_PREFIX}`);
+    expect(stored ?? null).toBeNull();
+  });
+
+  test("cache: 'session' reuses stored response without extra fetch", async () => {
+    let fetchCount = 0;
+    server.use(
+      http.get('https://api.pwnedpasswords.com/range/:prefix', () => {
+        fetchCount++;
+        return HttpResponse.text(`${HASH_SUFFIX}:3`);
+      }),
+    );
+
+    await checkBreach(PASSWORD, { cache: 'session' });
+    await checkBreach(PASSWORD, { cache: 'session' });
+    expect(fetchCount).toBe(1);
+  });
+});

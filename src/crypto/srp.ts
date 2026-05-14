@@ -1,3 +1,26 @@
+/**
+ * @module crypto/srp
+ *
+ * SRP (Secure Remote Password) protocol implementation using
+ * 2048-bit MODP group (RFC 5054/RFC 3526) and SHA-256 hashing.
+ *
+ * Provides client-side zero-knowledge password proof generation
+ * without transmitting the password to the server.
+ *
+ * @example
+ * ```ts
+ * import { createSRPRegistration, createSRPProof } from 'passwordthing/crypto';
+ *
+ * // Registration
+ * const { salt, verifier } = await createSRPRegistration('alice', 'password123');
+ * // Send { salt, verifier } to server, discard password
+ *
+ * // Authentication
+ * const { A, M1 } = await createSRPProof('alice', 'password123', salt, serverB);
+ * // Send { A, M1 } to server
+ * ```
+ */
+
 // RFC 5054 / RFC 3526 – 2048-bit MODP Group
 // Using SHA-256 for hashing (more secure than the original SHA-1)
 
@@ -103,14 +126,20 @@ async function computeX(salt: Uint8Array, identity: string, password: string): P
   return bytesToBigint(xHash);
 }
 
+/** SRP registration values for server-side storage. */
 export interface SRPRegistration {
-  salt: string;    // hex-encoded random salt
-  verifier: string; // hex-encoded g^x mod N
+  /** Hex-encoded random 16-byte salt. */
+  salt: string;
+  /** Hex-encoded verifier `v = g^x mod N`. */
+  verifier: string;
 }
 
+/** SRP client authentication proof. */
 export interface SRPProof {
-  A: string;  // hex-encoded client public ephemeral
-  M1: string; // hex-encoded client proof
+  /** Hex-encoded client public ephemeral value `A`. */
+  A: string;
+  /** Hex-encoded client proof `M1`. */
+  M1: string;
 }
 
 /**
@@ -125,8 +154,7 @@ export async function createSRPRegistration(
   const x = await computeX(salt, identity, password);
   const v = modPow(g, x, N);
 
-  // Zero-fill x from memory
-  x.toString(16).split('').fill('0');
+
 
   return {
     salt: bytesToHex(salt),

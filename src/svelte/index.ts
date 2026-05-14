@@ -1,3 +1,16 @@
+/**
+ * @module svelte
+ *
+ * Svelte 5 stores for password management and passkey
+ * authentication. Uses `writable` and `derived` stores
+ * for reactive state.
+ *
+ * @example
+ * ```ts
+ * import { usePassword, usePasskey } from 'passwordthing/svelte';
+ * ```
+ */
+
 import { writable, derived, get } from 'svelte/store';
 import type { Readable, Writable } from 'svelte/store';
 import type { ValidationOptions, ValidationResult } from '../core/validate.js';
@@ -25,30 +38,52 @@ import {
 } from '../passkey/passkey.js';
 
 export interface UsePasswordConfig {
+  /** Validation rules (min, max, digits, etc.). */
   rules?: ValidationOptions;
+  /** Strength scoring preset. Default `'BASIC'`. */
   strengthPreset?: StrengthPreset;
+  /** Enable Have I Been Pwned breach checking. Default `false`. */
   enableBreachCheck?: boolean;
+  /** Debounce delay in ms for breach lookups. Default 500. */
   breachDebounceMs?: number;
+  /** Known user data to penalize in strength evaluation. */
   userInputs?: string[];
 }
 
 export interface BreachStatus {
+  /** Whether a breach check is in progress. */
   loading: boolean;
+  /** Whether the password was found in known breaches. */
   isPwned: boolean;
+  /** Number of occurrences across breaches. */
   occurrences: number;
 }
 
 export interface UsePasswordReturn {
+  /** Current password value (writable store). */
   value: Writable<string>;
+  /** Update password value (triggers validation, strength, breach). */
   setValue: (val: string) => void;
+  /** Whether the password passes all validation rules (derived store). */
   isValid: Readable<boolean>;
+  /** List of failed validation rules with messages (derived store). */
   failedRules: Readable<ValidationResult['failedRules']>;
+  /** Strength evaluation result, or null if empty (derived store). */
   strength: Readable<StrengthResult | null>;
+  /** Breach check status, or null if disabled (readable store). */
   breachStatus: Readable<BreachStatus | null>;
+  /** Generate a new password with the given generator options. */
   generateNew: (options: GeneratorOptions) => void;
+  /** Clean up the debounce timer. Call on component destroy. */
   destroy: () => void;
 }
 
+/**
+ * Svelte store factory for password management.
+ *
+ * @param config - Optional configuration.
+ * @returns Password stores and actions.
+ */
 export function usePassword(config: UsePasswordConfig = {}): UsePasswordReturn {
   const {
     rules,
@@ -124,15 +159,27 @@ export function usePassword(config: UsePasswordConfig = {}): UsePasswordReturn {
 }
 
 export interface UsePasskeyReturn {
+  /** Whether passkeys are supported in the current environment. */
   isSupported: boolean;
+  /** Whether an authentication/registration operation is in progress (readable store). */
   isAuthenticating: Readable<boolean>;
+  /** Last error, or null (readable store). */
   error: Readable<Error | null>;
+  /** Register a new passkey (flat API). Returns null on error. */
   register: (options: PasskeyRegisterOptions) => Promise<PasskeyRegistrationResponse | null>;
+  /** Authenticate with a passkey (flat API). Returns null on error. */
   authenticate: (options: PasskeyAuthenticateOptions) => Promise<PasskeyAuthenticationResponse | null>;
+  /** Register a new passkey (server-options API). Returns null on error. */
   registerWithServerOptions: (options: ServerRegistrationOptions) => Promise<PasskeyRegistrationResponse | null>;
+  /** Authenticate with a passkey (server-options API). Returns null on error. */
   authenticateWithServerOptions: (options: ServerAuthenticationOptions) => Promise<PasskeyAuthenticationResponse | null>;
 }
 
+/**
+ * Svelte store factory for passkey management.
+ *
+ * @returns Passkey stores and wrapped functions.
+ */
 export function usePasskey(): UsePasskeyReturn {
   const isAuthenticatingStore = writable(false);
   const errorStore = writable<Error | null>(null);

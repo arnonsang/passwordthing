@@ -1,77 +1,143 @@
+/**
+ * @module passkey/passkey
+ *
+ * WebAuthn passkey registration and authentication with dual
+ * API surface.
+ *
+ * **Flat API** — field-by-field options for simple integration:
+ * `register()`, `authenticate()`.
+ *
+ * **Server-options API** — accepts options in the format sent
+ * by any WebAuthn server (base64url strings):
+ * `registerWithServerOptions()`, `authenticateWithServerOptions()`.
+ *
+ * @example
+ * ```ts
+ * import { registerWithServerOptions } from 'passwordthing/passkey';
+ * const cred = await registerWithServerOptions(serverOptions);
+ * ```
+ */
+
 import { base64URLToArrayBuffer, arrayBufferToBase64URL } from './utils.js';
 
 
 //Server-options types (base64url strings, as sent by any WebAuthn server)
+/** Credential descriptor in server format (base64url id). */
 export interface ServerCredentialDescriptor {
+  /** Base64url-encoded credential ID. */
   id: string;
   type: 'public-key';
   transports?: AuthenticatorTransport[];
 }
 
+/** Registration options in server format (base64url strings). */
 export interface ServerRegistrationOptions {
+  /** Base64url-encoded challenge. */
   challenge: string;
+  /** Relying party info. */
   rp: { id?: string; name: string };
+  /** User info with base64url-encoded ID. */
   user: { id: string; name: string; displayName: string };
+  /** Public key credential parameters. */
   pubKeyCredParams: Array<{ type: 'public-key'; alg: number }>;
+  /** Timeout in ms. Default 60000. */
   timeout?: number;
+  /** Attestation conveyance. Default `'none'`. */
   attestation?: AttestationConveyancePreference;
+  /** Authenticator selection criteria. */
   authenticatorSelection?: AuthenticatorSelectionCriteria;
+  /** Credentials to exclude from registration. */
   excludeCredentials?: ServerCredentialDescriptor[];
 }
 
+/** Authentication options in server format (base64url strings). */
 export interface ServerAuthenticationOptions {
+  /** Base64url-encoded challenge. */
   challenge: string;
+  /** Relying party ID (optional, inferred from origin if omitted). */
   rpId?: string;
+  /** Timeout in ms. Default 60000. */
   timeout?: number;
+  /** User verification requirement. Default `'preferred'`. */
   userVerification?: UserVerificationRequirement;
+  /** Allowed credentials for authentication. */
   allowCredentials?: ServerCredentialDescriptor[];
 }
 
 // Flat options types (manual field-by-field API)
+/** Registration options using flat field-by-field API. */
 export interface PasskeyRegisterOptions {
-  challenge: string;          // base64url challenge from server
-  rpId: string;               // relying party domain
+  /** Base64url-encoded challenge from server. */
+  challenge: string;
+  /** Relying party domain. */
+  rpId: string;
+  /** Relying party display name. */
   rpName: string;
-  userId: string;             // base64url user id
+  /** Base64url-encoded user ID. */
+  userId: string;
+  /** User login name. */
   userName: string;
+  /** User display name. */
   userDisplayName: string;
+  /** Timeout in ms. Default 60000. */
   timeout?: number;
+  /** Attestation conveyance. Default `'none'`. */
   attestation?: AttestationConveyancePreference;
+  /** Authenticator attachment preference. */
   authenticatorAttachment?: AuthenticatorAttachment;
 }
 
+/** Registration response with base64url-encoded fields. */
 export interface PasskeyRegistrationResponse {
+  /** Credential ID. */
   id: string;
+  /** Base64url-encoded raw credential ID. */
   rawId: string;
   type: 'public-key';
   response: {
+    /** Base64url-encoded client data JSON. */
     clientDataJSON: string;
+    /** Base64url-encoded attestation object. */
     attestationObject: string;
   };
 }
 
 
+/** Authentication options using flat field-by-field API. */
 export interface PasskeyAuthenticateOptions {
-  challenge: string;          // base64url challenge from server
+  /** Base64url-encoded challenge from server. */
+  challenge: string;
+  /** Relying party domain. */
   rpId: string;
+  /** Timeout in ms. Default 60000. */
   timeout?: number;
+  /** Allowed credentials for authentication. */
   allowCredentials?: Array<{ id: string; type: 'public-key' }>;
+  /** User verification requirement. Default `'preferred'`. */
   userVerification?: UserVerificationRequirement;
 }
 
+/** Authentication response with base64url-encoded fields. */
 export interface PasskeyAuthenticationResponse {
+  /** Credential ID. */
   id: string;
+  /** Base64url-encoded raw credential ID. */
   rawId: string;
   type: 'public-key';
   response: {
+    /** Base64url-encoded client data JSON. */
     clientDataJSON: string;
+    /** Base64url-encoded authenticator data. */
     authenticatorData: string;
+    /** Base64url-encoded signature. */
     signature: string;
+    /** Base64url-encoded user handle, or null. */
     userHandle: string | null;
   };
 }
 
 
+/** Check whether WebAuthn/passkeys are supported in the current environment. */
 export function isSupported(): boolean {
   return (
     typeof globalThis.window !== 'undefined' &&
@@ -80,6 +146,13 @@ export function isSupported(): boolean {
   );
 }
 
+/**
+ * Register a new passkey (flat API).
+ *
+ * @param options - Flat registration options.
+ * @returns Registration response with base64url-encoded fields.
+ * @throws {Error} If registration fails or returns an invalid credential type.
+ */
 export async function register(
   options: PasskeyRegisterOptions,
 ): Promise<PasskeyRegistrationResponse> {
@@ -125,6 +198,15 @@ export async function register(
   };
 }
 
+/**
+ * Register a new passkey using server-format options (base64url strings).
+ *
+ * Accepts options directly from a WebAuthn server without field remapping.
+ *
+ * @param options - Server-format registration options.
+ * @returns Registration response with base64url-encoded fields.
+ * @throws {Error} If registration fails or returns an invalid credential type.
+ */
 export async function registerWithServerOptions(
   options: ServerRegistrationOptions,
 ): Promise<PasskeyRegistrationResponse> {
@@ -172,6 +254,15 @@ export async function registerWithServerOptions(
   };
 }
 
+/**
+ * Authenticate with a passkey using server-format options (base64url strings).
+ *
+ * Accepts options directly from a WebAuthn server without field remapping.
+ *
+ * @param options - Server-format authentication options.
+ * @returns Authentication response with base64url-encoded fields.
+ * @throws {Error} If authentication fails or returns an invalid credential type.
+ */
 export async function authenticateWithServerOptions(
   options: ServerAuthenticationOptions,
 ): Promise<PasskeyAuthenticationResponse> {
@@ -210,6 +301,13 @@ export async function authenticateWithServerOptions(
   };
 }
 
+/**
+ * Authenticate with a passkey (flat API).
+ *
+ * @param options - Flat authentication options.
+ * @returns Authentication response with base64url-encoded fields.
+ * @throws {Error} If authentication fails or returns an invalid credential type.
+ */
 export async function authenticate(
   options: PasskeyAuthenticateOptions,
 ): Promise<PasskeyAuthenticationResponse> {

@@ -1,3 +1,18 @@
+/**
+ * @module core/generate
+ *
+ * Cryptographically secure password generator with amortized CSPRNG
+ * buffering and pre-computed charset byte caches for zero-allocation hot paths.
+ *
+ * @example
+ * ```ts
+ * import { generate } from 'passwordthing/core';
+ * const pw = generate({ length: 16, includeSymbols: true });
+ * ```
+ */
+
+import { nextUint32 } from './_rng.js';
+
 const UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const LOWERCASE = 'abcdefghijklmnopqrstuvwxyz';
 const DIGITS = '0123456789';
@@ -13,26 +28,22 @@ const VOWELS_CLEAN = VOWELS.split('').filter((c) => !AMBIGUOUS.has(c)).join('');
 const CONSONANTS_CLEAN = CONSONANTS.split('').filter((c) => !AMBIGUOUS.has(c)).join('');
 
 export interface GeneratorOptions {
+  /** Password length (must be >= 1). */
   length: number;
+  /** Include uppercase letters. Default `true`. */
   includeUppercase?: boolean;
+  /** Include lowercase letters. Default `true`. */
   includeLowercase?: boolean;
+  /** Include numeric digits. Default `true`. */
   includeDigits?: boolean;
+  /** Include symbols. Default `false`. */
   includeSymbols?: boolean;
+  /** Exclude ambiguous characters (i, l, 1, L, o, 0, O, I). */
   excludeAmbiguous?: boolean;
+  /** Generate pronounceable password (vowel-consonant alternation). */
   pronounceable?: boolean;
+  /** Custom character set to use instead of built-in pools. */
   customCharset?: string;
-}
-
-// Module-level uint32 entropy buffer — one getRandomValues() per 256 chars amortized
-const _rng = new Uint32Array(256);
-let _rngIdx = 256;
-
-function nextUint32(): number {
-  if (_rngIdx >= _rng.length) {
-    globalThis.crypto.getRandomValues(_rng);
-    _rngIdx = 0;
-  }
-  return _rng[_rngIdx++]!;
 }
 
 // Charset string cache: index = flagBits | (excludeAmbiguous ? 16 : 0)
@@ -65,7 +76,7 @@ function lookupCharsetBytes(flagBits: number, excludeAmbiguous: boolean): Uint8A
   return cb;
 }
 
-// Reusable output buffer — avoids per-call heap allocation for lengths ≤ 256
+// Reusable output buffer for lengths <= 256
 const _outBuf = new Uint8Array(256);
 // TextDecoder for zero-copy Uint8Array → string (latin1 covers all ASCII + extended)
 const _decoder = new TextDecoder('latin1');
@@ -93,6 +104,34 @@ function generateFromCharset(charset: string, length: number): string {
   return generateFromCharsetBytes(cb, length);
 }
 
+/**
+ * Generate a cryptographically secure random password.
+ *
+ * Uses an internal entropy buffer (256 `uint32` values) to amortize
+ * `crypto.getRandomValues()` calls across many characters. Rejection
+ * sampling avoids modular bias.
+ *
+ * @param options - Generator options.
+ * @returns Generated password string.
+ *
+ * @throws {RangeError} If `length < 1`.
+ * @throws {Error} If no character pool can be built from the flags.
+ *
+ * @example
+ * ```ts
+ * // Standard password
+ * generate({ length: 16 });
+ *
+ * // With symbols and no ambiguous chars
+ * generate({ length: 20, includeSymbols: true, excludeAmbiguous: true });
+ *
+ * // Pronounceable
+ * generate({ length: 12, pronounceable: true });
+ *
+ * // Custom charset
+ * generate({ length: 8, customCharset: 'abc123' });
+ * ```
+ */
 export function generate(options: GeneratorOptions): string {
   const {
     length,
@@ -162,4 +201,23 @@ function generatePronounceable(
   }
 
   return strFromBytes(buf, length);
+}
+
+/**
+ * Generate multiple cryptographically secure random passwords in one call.
+ *
+ * @param count - Number of passwords to generate (must be >= 1).
+ * @param options - Generator options applied to every password.
+ * @returns Array of generated password strings.
+ *
+ * @throws {RangeError} If `count < 1`.
+ *
+ * @example
+ * ```ts
+ * const suggestions = generateBatch(5, { length: 16, includeSymbols: true });
+ * ```
+ */
+export function generateBatch(count: number, options: GeneratorOptions): string[] {
+  if (count < 1) throw new RangeError('count must be at least 1');
+  return Array.from({ length: count }, () => generate(options));
 }

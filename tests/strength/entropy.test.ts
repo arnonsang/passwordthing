@@ -76,6 +76,58 @@ describe('evaluateStrength – stronger password scores higher', () => {
   });
 });
 
+describe('evaluateStrength – date pattern penalty', () => {
+  test('year pattern reduces entropy vs year-free equivalent', () => {
+    const withYear = evaluateStrength('BlueMoon1985Qr!');
+    const noYear = evaluateStrength('BlueMoonXYZQr!');
+    expect(withYear.entropyBits).toBeLessThanOrEqual(noYear.entropyBits);
+  });
+
+  test('8-digit date pattern triggers penalty', () => {
+    // XpQ19901231MnR: pool=upper+lower+digit (62), len=14; base=14*log2(62)≈83.4 bits
+    const r = evaluateStrength('XpQ19901231MnR');
+    const baseEntropy = 14 * Math.log2(62);
+    expect(r.entropyBits).toBeLessThan(baseEntropy);
+  });
+
+  test('date feedback suggestion included', () => {
+    const r = evaluateStrength('mypass19901231!');
+    expect(r.feedback.suggestions).toContain('Avoid using dates or years in your password.');
+  });
+});
+
+describe('evaluateStrength – keyboard walk penalty', () => {
+  test('horizontal row walk reduces entropy', () => {
+    const walk = evaluateStrength('qwerty99XZ!');
+    const noWalk = evaluateStrength('bzmkty99XZ!');
+    expect(walk.entropyBits).toBeLessThanOrEqual(noWalk.entropyBits);
+  });
+
+  test('vertical column walk (qaz) triggers penalty', () => {
+    const col = evaluateStrength('qazXMNP99!');
+    const nocol = evaluateStrength('bxmXMNP99!');
+    expect(col.entropyBits).toBeLessThanOrEqual(nocol.entropyBits);
+  });
+
+  test('keyboard walk feedback suggestion included', () => {
+    const r = evaluateStrength('qazWSX123!');
+    expect(r.feedback.suggestions.join(' ')).toMatch(/keyboard|qwerty|qaz/i);
+  });
+});
+
+describe('evaluateStrength – repetition penalty', () => {
+  test('high-repetition password gets lower entropy than diverse one', () => {
+    const rep = evaluateStrength('aaaaaaaaaa1!');
+    const div = evaluateStrength('aBcDeFgH1!mN');
+    expect(rep.entropyBits).toBeLessThanOrEqual(div.entropyBits);
+  });
+
+  test('repetition feedback suggestion included when dominant char > 40%', () => {
+    const r = evaluateStrength('aaaaaaaaB1!');
+    expect(r.feedback.suggestions).toContain('Avoid repeating the same character many times.');
+  });
+});
+
 describe('evaluateStrength – timeToCrack format', () => {
   test('very weak password cracks instantly offline', () => {
     const r = evaluateStrength('a');

@@ -1,3 +1,19 @@
+/**
+ * @module crypto/stretch
+ *
+ * PBKDF2 key derivation using the Web Crypto API with
+ * OWASP 2024 recommended iteration counts per algorithm.
+ *
+ * @example
+ * ```ts
+ * import { pbkdf2Hash } from 'passwordthing/crypto';
+ * // Registration: generate random salt
+ * const { hash, salt } = await pbkdf2Hash('myPassword');
+ * // Login: reproduce hash from stored salt
+ * const { hash: loginHash } = await pbkdf2Hash('myPassword', { salt });
+ * ```
+ */
+
 export type Pbkdf2HashAlgorithm = 'SHA-256' | 'SHA-384' | 'SHA-512';
 
 const OWASP_ITERATIONS: Record<Pbkdf2HashAlgorithm, number> = {
@@ -9,14 +25,19 @@ const OWASP_ITERATIONS: Record<Pbkdf2HashAlgorithm, number> = {
 const KEY_LENGTH_BITS = 256;
 
 export interface Pbkdf2HashOptions {
-  salt?: string;        // hex-encoded salt; generated if omitted (registration path)
-  hash?: Pbkdf2HashAlgorithm;  // default: 'SHA-256'
-  iterations?: number;  // default: OWASP 2024 recommended for the chosen hash algorithm
+  /** Hex-encoded salt (16 bytes). If omitted, a random salt is generated. */
+  salt?: string;
+  /** Hash algorithm. Default `'SHA-256'`. */
+  hash?: Pbkdf2HashAlgorithm;
+  /** Iteration count. Defaults to OWASP 2024 recommendation for chosen hash. */
+  iterations?: number;
 }
 
 export interface Pbkdf2HashResult {
-  hash: string;  // base64-encoded derived key
-  salt: string;  // hex-encoded salt (store this alongside the hash)
+  /** Base64-encoded 256-bit derived key. */
+  hash: string;
+  /** Hex-encoded 16-byte salt (store alongside hash). */
+  salt: string;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -82,7 +103,9 @@ export async function pbkdf2Hash(
   );
 
   const derivedBytes = new Uint8Array(derivedBuffer);
-  const hash = btoa(String.fromCharCode(...derivedBytes));
+  let _binary = '';
+  for (let _i = 0; _i < derivedBytes.length; _i++) _binary += String.fromCharCode(derivedBytes[_i]!);
+  const hash = btoa(_binary);
 
   // Zero-fill derived bytes from memory
   derivedBytes.fill(0);

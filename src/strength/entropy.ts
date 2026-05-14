@@ -1,23 +1,51 @@
+/**
+ * @module strength/entropy
+ *
+ * Entropy-based password strength evaluator with keyboard walk
+ * detection (horizontal rows + vertical columns), date pattern
+ * analysis, L33t substitution analysis, common-password lookup,
+ * repetition penalty, and user-input penalty. Produces a 0-4 score
+ * with crack-time estimates and actionable feedback.
+ *
+ * @example
+ * ```ts
+ * import { evaluateStrength } from 'passwordthing/strength';
+ * const r = evaluateStrength('p4ssw0rd');
+ * // { score: 0, label: 'Very Weak', ... }
+ * ```
+ */
+
 import { isCommonPassword } from './bloom.js';
 import { type StrengthPreset, PRESET_THRESHOLDS } from './presets.js';
 
 export type { StrengthPreset };
 
 export interface EvaluateStrengthOptions {
+  /** Scoring preset. Default `'BASIC'`. */
   preset?: StrengthPreset;
+  /** Known user data (name, email, etc.) checked for substring inclusion. */
   userInputs?: string[];
 }
 
 export interface StrengthResult {
+  /** Overall strength score from 0 (weakest) to 4 (strongest). */
   score: 0 | 1 | 2 | 3 | 4;
+  /** Estimated entropy in bits. */
   entropyBits: number;
+  /** Human-readable strength label. */
   label: 'Very Weak' | 'Weak' | 'Fair' | 'Strong' | 'Very Strong';
+  /** Estimated crack times under two adversarial models. */
   timeToCrack: {
+    /** ~10 billion guesses/second (GPU cluster, fast hash like MD5). */
     offlineFastHashing: string;
+    /** ~10 guesses/second (online service with rate limiting). */
     onlineThrottled: string;
   };
+  /** Actionable feedback for the user. */
   feedback: {
+    /** Primary warning, or null if none. */
     warning: string | null;
+    /** Specific suggestions to improve the password. */
     suggestions: string[];
   };
 }
@@ -42,8 +70,9 @@ const KB_ROWS = [
 ];
 const KB_ROWS_REV = KB_ROWS.map((r) => r.split('').reverse().join(''));
 
-// Pre-computed set of all keyboard row n-grams (forward and reversed, length >= 4)
 const KB_NGRAMS = new Set<string>();
+
+// Horizontal row n-grams (length >= 4)
 for (let _ri = 0; _ri < KB_ROWS.length; _ri++) {
   const _row = KB_ROWS[_ri]!;
   const _rev = KB_ROWS_REV[_ri]!;
@@ -56,9 +85,16 @@ for (let _ri = 0; _ri < KB_ROWS.length; _ri++) {
   }
 }
 
-function hasKeyboardWalk(s: string, minLen = 4): boolean {
+// Vertical column sequences (forward and reversed, exact 3-key columns)
+const KB_COLS = ['qaz', 'wsx', 'edc', 'rfv', 'tgb', 'yhn', 'ujm'];
+for (const _col of KB_COLS) {
+  KB_NGRAMS.add(_col);
+  KB_NGRAMS.add(_col.split('').reverse().join(''));
+}
+
+function hasKeyboardWalk(s: string, minLen = 3): boolean {
   const lower = s.toLowerCase();
-  const maxWindow = Math.min(lower.length, 10); // longest keyboard row is 10 chars
+  const maxWindow = Math.min(lower.length, 10);
   for (let len = minLen; len <= maxWindow; len++) {
     for (let start = 0; start <= lower.length - len; start++) {
       if (KB_NGRAMS.has(lower.slice(start, start + len))) return true;
@@ -68,18 +104,30 @@ function hasKeyboardWalk(s: string, minLen = 4): boolean {
 }
 
 
+// Date patterns: standalone years, 8-digit dates, separator-style dates
+const DATE_YEAR = /(19|20)\d{2}/;
+const DATE_8 = /(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])|(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(19|20)\d{2}/;
+const DATE_SEP = /(0?[1-9]|1[0-2])[/\-.](0?[1-9]|[12]\d|3[01])[/\-.]((19|20)?\d{2})/;
+
+function hasDatePattern(s: string): boolean {
+  return DATE_8.test(s) || DATE_SEP.test(s) || DATE_YEAR.test(s);
+}
+
+
 function charPoolSize(s: string): number {
-  let hasLower = false, hasUpper = false, hasDigit = false, hasOther = false;
+  let hasLower = false, hasUpper = false, hasDigit = false, hasSymbol = false, hasUnicode = false;
   for (let i = 0; i < s.length; i++) {
     const code = s.charCodeAt(i);
     if (code >= 97 && code <= 122) hasLower = true;
     else if (code >= 65 && code <= 90) hasUpper = true;
     else if (code >= 48 && code <= 57) hasDigit = true;
-    else hasOther = true;
-    if (hasLower && hasUpper && hasDigit && hasOther) break;
+    else if (code < 128) hasSymbol = true;
+    else hasUnicode = true;
+    if (hasLower && hasUpper && hasDigit && hasSymbol && hasUnicode) break;
   }
   return Math.max(
-    (hasLower ? 26 : 0) + (hasUpper ? 26 : 0) + (hasDigit ? 10 : 0) + (hasOther ? 32 : 0),
+    (hasLower ? 26 : 0) + (hasUpper ? 26 : 0) + (hasDigit ? 10 : 0) +
+    (hasSymbol ? 32 : 0) + (hasUnicode ? 128 : 0),
     1,
   );
 }
@@ -118,10 +166,31 @@ function entropyToScore(
 }
 
 
-// Guesses per second constants
-const OFFLINE_FAST_GPS = 1e10; // GPU cluster with fast hash
-const ONLINE_THROTTLED_GPS = 10; // online service with rate-limiting
+const OFFLINE_FAST_GPS = 1e10;
+const ONLINE_THROTTLED_GPS = 10;
 
+/**
+ * Evaluate the strength of a password.
+ *
+ * Computes base entropy as `L x log2(R)` where L is length and R
+ * is the guessed character-pool size. Applies penalties for:
+ *
+ * - Dictionary hits (caps at 15 bits for exact match, 50% cut for L33t).
+ * - Keyboard walks: horizontal rows (>= 4 chars) and vertical columns (>= 3 chars), 40% cut.
+ * - Date patterns (year, YYYYMMDD, MM/DD/YYYY, etc.), 30% cut.
+ * - High character repetition (dominant char > 40% of password), proportional cut.
+ * - User-input substrings, 60% cut.
+ *
+ * @param password - The password to evaluate.
+ * @param options - Optional preset and user inputs.
+ * @returns Strength result with score, entropy, and feedback.
+ *
+ * @example
+ * ```ts
+ * evaluateStrength('CorrectHorseBatteryStaple');
+ * // score: 4, label: 'Very Strong'
+ * ```
+ */
 export function evaluateStrength(
   password: string,
   options: EvaluateStrengthOptions = {},
@@ -139,7 +208,6 @@ export function evaluateStrength(
     };
   }
 
-  // Base entropy: E = L × log2(R)
   const R = charPoolSize(password);
   let entropyBits = password.length * Math.log2(R);
 
@@ -157,11 +225,31 @@ export function evaluateStrength(
     suggestions.push('Avoid predictable substitutions like @ for a or 3 for e.');
   }
 
-  // Keyboard walk penalty
+  // Keyboard walk penalty (rows >= 4 chars, columns >= 3 chars)
   if (hasKeyboardWalk(password)) {
     entropyBits *= 0.6;
     warnings.push('This contains a keyboard pattern.');
-    suggestions.push('Avoid sequences like "qwerty" or "asdfgh".');
+    suggestions.push('Avoid sequences like "qwerty", "asdfgh", or "qaz".');
+  }
+
+  // Date pattern penalty
+  if (hasDatePattern(password)) {
+    entropyBits *= 0.7;
+    if (warnings.length === 0) warnings.push('This contains a date or year pattern.');
+    suggestions.push('Avoid using dates or years in your password.');
+  }
+
+  // Repetition penalty: dominant character takes up > 40% of password
+  if (password.length >= 4) {
+    const freq = new Map<string, number>();
+    for (const c of password) freq.set(c, (freq.get(c) ?? 0) + 1);
+    let maxFreq = 0;
+    for (const v of freq.values()) if (v > maxFreq) maxFreq = v;
+    const dominance = maxFreq / password.length;
+    if (dominance > 0.4) {
+      entropyBits *= Math.max(0.3, 1 - dominance);
+      suggestions.push('Avoid repeating the same character many times.');
+    }
   }
 
   // User inputs penalty
@@ -193,7 +281,6 @@ export function evaluateStrength(
   const score = entropyToScore(entropyBits, thresholds);
   const label = SCORE_LABELS[score];
 
-  // Guesses ≈ 2^(entropyBits)
   const guesses = Math.pow(2, entropyBits);
   const offlineSec = guesses / OFFLINE_FAST_GPS;
   const onlineSec = guesses / ONLINE_THROTTLED_GPS;
