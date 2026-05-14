@@ -1,6 +1,6 @@
 {
   "name": "@arnonsang/passwordthing",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "exports": {
     "./core": "./src/core/index.ts",
     "./strength": "./src/strength/index.ts",
